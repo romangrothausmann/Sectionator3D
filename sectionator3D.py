@@ -4,6 +4,9 @@
 
 ###run with:
 ## PYTHONPATH=/opt/vtk-5.10.1/lib/python2.7/site-packages/ LD_LIBRARY_PATH=/opt/vtk-5.10.1/lib/vtk-5.10/ /opt/VirtualGL/bin/vglrun python ~/vtk/py/pick_closest-point_03.py -i SLOT_01_seg-131125_s255_mean3_fh0_mc127_cap_clip_lmp_cl-skel_be.vtp
+###proting to vtk6 not fully finished (e.g. point-picker cone not visible)
+##PYTHONPATH=/opt/vtk-6.2_git/lib/python2.7/site-packages/ LD_LIBRARY_PATH=/opt/vtk-6.2_git/lib/ vglrun python ~/vtk/py/sectionator3D/sectionator3D.py -i 13_201_PD_rec_crop02_seg10_s255_mean3_fh0_mc127_cap_clip_lmp_cl-skel.vtp -s 13_201_PD_rec_crop02_seg10_s255_mean3_fh0_mc127_cap_clip_lmp.vtp  -o 13_201_PD_rec_crop02_seg10_s255_mean3_fh0_mc127_cap_clip_lmp_crop.vtp -v  13_201_PMT_rec_crop02_mod01_8b.mhd
+
 
 ##01: load skel and place boxWidget at picked point (Shift+MMB)
 ##02: orient glyph and boxWidget
@@ -12,6 +15,7 @@
 ##05: color mesh according to voxel data (vtkProbeFilter), remember cBox scale, optimize performance, v1.2
 ##06: progress report of filters, toggle transparency, v1.3
 ##07: debugging repetitive clip-box transform, v1.3.1
+##08: porting to vtk6
 
 ###todo:
 ## f: centre on marker
@@ -53,7 +57,12 @@ except ImportError, error:
 
 class MyInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 #class MyInteractorStyle(vtk.vtkInteractorStyleTrackballActor):
-    def __init__(self,parent=None):
+    MMBpressed= False #Oddly vtk-6.2 needs this line even though it should not be used as such:  https://docs.python.org/2/tutorial/classes.html#class-and-instance-variables   http://programmers.stackexchange.com/questions/254576/is-it-a-good-practice-to-declare-instance-variables-as-none-in-a-class-in-python
+    picker = vtk.vtkPointPicker()
+    refNormal=[-1,0,0]
+    opaque= False
+
+    def __init__(self):
         self.AddObserver("MiddleButtonPressEvent",self.middleButtonPressEvent)
         #self.AddObserver("OnMiddleButtonDown",self.middleButtonPressEvent)
         self.AddObserver("MiddleButtonReleaseEvent",self.middleButtonReleaseEvent)
@@ -63,10 +72,10 @@ class MyInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
         self.MMBpressed= False
         #picker = vtk.vtkCellPicker()
-        self.picker = vtk.vtkPointPicker()
         self.picker.SetTolerance(1E-2)
         self.refNormal=[-1,0,0]
         self.opaque= False
+        #print "Init ", hasattr(self, 'MMBpressed')
 
 
     def keypressCallback(self,obj,event):
@@ -190,6 +199,7 @@ class MyInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         return
  
     def MoveEvent(self,obj,event):
+        #print hasattr(self, 'MMBpressed')#vtk-6.2 causes a AttributeError unless MMBpressed is defined as a class variable, vtk-5.10 workes fine with MMBpressed just being an instance variable
         #if (self.MMBpressed and interactor.GetShiftKey()):
         if(self.MMBpressed):
             #print "Shift held, Middle Button pressed and moving"
@@ -410,13 +420,19 @@ glyphtransf.SetInputConnection(glyphSource.GetOutputPort())
 glyphtransf.SetTransform(vtk.vtkTransform())
 
 glyphs = vtk.vtkGlyph3D()
-glyphs.SetInput(PickedSeeds)
-#glyphs.SetSource(glyphSource.GetOutput())
-glyphs.SetSource(glyphtransf.GetOutput())
+if vtk.VTK_MAJOR_VERSION <= 5:
+    glyphs.SetInput(PickedSeeds)
+    glyphs.SetSource(glyphtransf.GetOutput())
+else:
+    glyphs.SetInputData(PickedSeeds)
+    glyphs.SetSourceData(glyphtransf.GetOutput())
 glyphs.SetScaleModeToDataScalingOff()
         #glyphs.SetScaleFactor(self._Surface.GetLength()*0.01)
 glyphMapper = vtk.vtkPolyDataMapper()
-glyphMapper.SetInput(glyphs.GetOutput())
+if vtk.VTK_MAJOR_VERSION <= 5:
+    glyphMapper.SetInput(glyphs.GetOutput())
+else:
+    glyphMapper.SetInputData(glyphs.GetOutput())
 #glyphMapper.SetInput(glyphSource.GetOutput())
 
 SeedActor = vtk.vtkActor()
@@ -437,7 +453,10 @@ surf.DeepCopy(surfr.GetOutput())
 smapper = vtk.vtkPolyDataMapper()
 #add_progress_observer(smapper)
 #smapper.SetInputConnection(surfr.GetOutputPort())
-smapper.SetInput(surf)
+if vtk.VTK_MAJOR_VERSION <= 5:
+    smapper.SetInput(surf)
+else:
+    smapper.SetInputData(surf)
 #smapper.ImmediateModeRenderingOn()
 smapper.ImmediateModeRenderingOff()
 #smapper.GlobalImmediateModeRenderingOn()
@@ -465,7 +484,9 @@ renwin.AddRenderer(renderer)
 
 
 interactor = vtk.vtkRenderWindowInteractor()
-interactor.SetInteractorStyle(MyInteractorStyle())
+style= MyInteractorStyle()
+style.SetCurrentRenderer(renderer)#to avoid for vtk-6.2: vtkInteractorStyleTrackballCamera: no current renderer on the interactor style.
+interactor.SetInteractorStyle(style)
 #interactor.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
 interactor.SetRenderWindow(renwin)
  
@@ -482,7 +503,10 @@ ClipWidget = vtk.vtkBoxWidget()
 #ClipWidget = vtk.vtkBoxWidget()
 ClipWidget.GetFaceProperty().SetColor(0.6,0.6,0.2)
 ClipWidget.GetFaceProperty().SetOpacity(0.25)
-ClipWidget.SetInput(source)
+if vtk.VTK_MAJOR_VERSION <= 5:
+    ClipWidget.SetInput(source)
+else:
+    ClipWidget.SetInputData(source)
 ClipWidget.SetInteractor(interactor)
 ClipWidget.SetPlaceFactor(1)
 #ClipWidget.SetPlaceFactor(.2)
@@ -508,7 +532,10 @@ planes = vtk.vtkPlanes()
 clipper = vtk.vtkClipPolyData()
 add_progress_observer(clipper)
 #clipper.SetInputConnection(surfr.GetOutputPort())
-clipper.SetInput(surf)
+if vtk.VTK_MAJOR_VERSION <= 5:
+    clipper.SetInput(surf)
+else:
+    clipper.SetInputData(surf)
 clipper.SetClipFunction(planes)
 #clipper.InsideOutOn()
 clipper.InsideOutOff()
@@ -541,8 +568,12 @@ if options.voxelf:
     
     probe = vtk.vtkProbeFilter()
     add_progress_observer(probe)
-    probe.SetInput(surf)
-    probe.SetSource(voxeld)
+    if vtk.VTK_MAJOR_VERSION <= 5:
+        probe.SetInput(surf)
+        probe.SetSource(voxeld)
+    else:
+        probe.SetInputData(surf)
+        probe.SetSourceData(voxeld)
     probe.Update()
     #surf= probe.GetOutput()
     surf.DeepCopy(probe.GetOutput())
@@ -560,7 +591,10 @@ if options.voxelf:
 
 connectivity = vtk.vtkPolyDataConnectivityFilter()
 add_progress_observer(connectivity)
-connectivity.SetInput(surf)
+if vtk.VTK_MAJOR_VERSION <= 5:
+    connectivity.SetInput(surf)
+else:
+    connectivity.SetInputData(surf)
 
 surfw = vtk.vtkXMLPolyDataWriter()
 add_progress_observer(surfw)
